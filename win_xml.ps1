@@ -147,5 +147,5 @@ if ($add) {
    }
 } else {
   $result.msg = "already present"
-
+}
 Exit-Json $result
