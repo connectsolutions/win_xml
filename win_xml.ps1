@@ -78,7 +78,7 @@ function BackupFile($path) {
 }
 
 $params = Parse-Args $args -supports_check_mode $true
-$dest = Get-AnsibleParam $params "path" -FailIfEmpty $true -aliases "dest, file"
+$dest = Get-AnsibleParam $params "path" -FailIfEmpty $true -aliases "dest", "file"
 $fragment = Get-AnsibleParam $params "fragment" -FailIfEmpty $true -aliases "xmlstring"
 $root = Get-AnsibleParam $params "root" -FailIfEmpty $false -Default "DocumentElement" -aliases "xpath"
 $backup = Get-AnsibleParam $params "backup" -FailIfEmpty $false -Default "no" -ValidateSet "no", "yes"
