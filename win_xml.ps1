@@ -35,7 +35,7 @@ function Compare-XmlDocs($actual, $expected) {
             }
             if ($expected.Attributes[$i].Value -ne $actual.Attributes[$i].Value) {
                 throw "attribute value mismatch for actual=" + $actual.Name
-            }           
+            }
         }
     }
 
@@ -78,10 +78,12 @@ function BackupFile($path) {
 }
 
 $params = Parse-Args $args -supports_check_mode $true
-$dest = Get-AnsibleParam $params "path" -FailIfEmpty $true
-$xml = Get-AnsibleParam $params "xml" -FailIfEmpty $true
-$root = Get-AnsibleParam $params "root" -FailIfEmpty $false -Default "DocumentElement"
-$backup = Get-AnsibleParam $params "backup" -FailIfEmpty $false -Default "no"
+$dest = Get-AnsibleParam $params "path" -FailIfEmpty $true -aliases "dest, file"
+$fragment = Get-AnsibleParam $params "fragment" -FailIfEmpty $true -aliases "xmlstring"
+$root = Get-AnsibleParam $params "root" -FailIfEmpty $false -Default "DocumentElement" -aliases "xpath"
+$backup = Get-AnsibleParam $params "backup" -FailIfEmpty $false -Default "no" -ValidateSet "no", "yes"
+$type = Get-AnsibleParam $params "type" -FailIfEmpty $false -Default "element" -ValidateSet "element", "attribute", "text"
+$attribute = Get-AnsibleParam $params "attribute" -FailIfEmpty ($type -eq "attribute")
 
 $result = New-Object PSObject @{
     win_xml = New-Object PSObject
@@ -89,63 +91,101 @@ $result = New-Object PSObject @{
 }
 
 If (-Not (Test-Path -Path $dest -PathType Leaf)){
-    Fail-Json $result "Specified path $dest does exist or is not a file."
-}
-$ext = [System.IO.Path]::GetExtension($dest)
-If ( $ext -notin '.xml'){
-    Fail-Json $result "Specified path $dest is not a vaild file type; must be XML."
+    Fail-Json $result "Specified path $dest does not exist or is not a file."
 }
 
 [xml]$xmlorig = Get-Content -Path $dest
 $xmlnew = $xmlorig.Clone()
-$xmlchild = [xml]$xml
+if ($type -eq "element") {
+    $xmlchild = [xml]$fragment
 
-$child = $xmlnew.CreateElement($xmlchild.DocumentElement.Name, $xmlnew.$root.NamespaceURI)
-foreach ($attr in $xmlchild.DocumentElement.Attributes) {
-    $child.SetAttribute($attr);
-}
-
-foreach ($node in $xmlchild.DocumentElement.ChildNodes) {
-    $newnode = $xmlnew.CreateElement($node.Name, $xmlnew.$root.NamespaceURI)
-    foreach ($attr in $node.Attributes) {
-       $newnode.SetAttribute($attr)
+    $child = $xmlnew.CreateElement($xmlchild.DocumentElement.Name, $xmlnew.$root.NamespaceURI)
+    foreach ($attr in $xmlchild.DocumentElement.Attributes) {
+        $child.SetAttribute($attr);
     }
-    $newnode.InnerText = $node.InnerText
-    $child.AppendChild($newnode) | Out-Null
- }
 
-$elements = FindElementsByName $xmlnew.$root $xmlchild.DocumentElement.Name
-
-[bool]$add = $TRUE
-if ($elements.Count) {
-    foreach ($element in $elements) {
-        try {
-           Compare-XmlDocs $xmlchild.DocumentElement $element 
-           $add = $FALSE
-           break
-        } catch {
-           $_.InvocationInfo | Out-File c:\win_xml.log
+    foreach ($node in $xmlchild.DocumentElement.ChildNodes) {
+        $newnode = $xmlnew.CreateElement($node.Name, $xmlnew.$root.NamespaceURI)
+        foreach ($attr in $node.Attributes) {
+            $newnode.SetAttribute($attr)
         }
+        $newnode.InnerText = $node.InnerText
+        $child.AppendChild($newnode) | Out-Null
     }
-    if ($add) {
+
+    $elements = FindElementsByName $xmlnew.$root $xmlchild.DocumentElement.Name
+
+    [bool]$add = $TRUE
+    if ($elements.Count) {
+        foreach ($element in $elements) {
+            try {
+                Compare-XmlDocs $xmlchild.DocumentElement $element
+                $add = $FALSE
+                break
+            } catch {
+                $_.InvocationInfo | Out-File c:\win_xml.log
+            }
+        }
+        if ($add) {
+            [void]$xmlnew.$root.AppendChild($child)
+        }
+    } else {
         [void]$xmlnew.$root.AppendChild($child)
-   }
-} else {
-    [void]$xmlnew.$root.AppendChild($child)
+    }
+
+    if ($add) {
+        $result.changed = $TRUE
+        if (-Not $params._ansible_check_mode) {
+            if ($backup -eq "yes") {
+                $result.backup = BackupFile($dest)
+            }
+            $result.msg = "xml added"
+            $xmlnew.Save($dest)
+        } else {
+            $result.msg = "added check mode"
+        }
+    } else {
+        $result.msg = "already present"
+    }
+} elseif ($type -eq "text") {
+    $node = $xmlnew.SelectSingleNode($root)
+    [bool]$add = ($node.InnerText -ne $fragment)
+    if ($add) {
+        $result.changed = $TRUE
+        if (-Not $params._ansible_check_mode) {
+            if ($backup -eq "yes") {
+                $result.backup = BackupFile($dest)
+            }
+            $node.InnerText = $fragment
+            $xmlnew.Save("$dest")
+            $result.msg = "text changed"
+        } else {
+            $result.msg = "text changed check mode"
+        }
+    } else {
+        $result.msg = "not changed"
+    }
+} elseif ($type -eq "attribute") {
+    $node = $xmlnew.SelectSingleNode($root)
+    [bool]$add = !$node.HasAttribute($attribute) -Or ($node.$attribute -ne $fragment)
+    if ($add) {
+        $result.changed = $TRUE
+        if (-Not $params._ansible_check_mode) {
+            if ($backup -eq "yes") {
+                $result.backup = BackupFile($dest)
+            }
+	    if (!$node.HasAttribute($attribute)) {
+	        $node.SetAttributeNode($attribute, $xmlnew.$root.NamespaceURI)
+            }
+            $node.SetAttribute($attribute, $fragment)
+            $xmlnew.Save("$dest")
+            $result.msg = "text changed"
+        } else {
+            $result.msg = "text changed check mode"
+        }
+    } else {
+        $result.msg = "not changed"
+    }
 }
 
-if ($add) {
-   $result.changed = $TRUE
-   if (-Not $params._ansible_check_mode) {
-      if ($backup -eq "yes") {
-         $result.backup = BackupFile($dest)
-      }
-      $result.msg = "xml added"
-      $xmlnew.Save($dest)
-   } else {
-     $result.msg = "added check mode"
-   }
-} else {
-  $result.msg = "already present"
-}
 Exit-Json $result
