@@ -78,12 +78,12 @@ function BackupFile($path) {
 }
 
 $params = Parse-Args $args -supports_check_mode $true
-$dest = Get-AnsibleParam $params "path" -FailIfEmpty $true -aliases "dest", "file"
-$fragment = Get-AnsibleParam $params "fragment" -FailIfEmpty $true -aliases "xmlstring"
-$root = Get-AnsibleParam $params "root" -FailIfEmpty $false -Default "DocumentElement" -aliases "xpath"
-$backup = Get-AnsibleParam $params "backup" -FailIfEmpty $false -Default "no" -ValidateSet "no", "yes"
-$type = Get-AnsibleParam $params "type" -FailIfEmpty $false -Default "element" -ValidateSet "element", "attribute", "text"
-$attribute = Get-AnsibleParam $params "attribute" -FailIfEmpty ($type -eq "attribute")
+$dest = Get-AnsibleParam $params "path" -type "path" -FailIfEmpty $true -aliases "dest", "file"
+$fragment = Get-AnsibleParam $params "fragment" -type "str" -FailIfEmpty $true -aliases "xmlstring"
+$root = Get-AnsibleParam $params "root" -type "str" -FailIfEmpty $false -Default "DocumentElement" -aliases "xpath"
+$backup = Get-AnsibleParam $params "backup" -type "bool" -FailIfEmpty $false -Default "no" -ValidateSet "no", "yes"
+$type = Get-AnsibleParam $params "type" -type "str" -FailIfEmpty $false -Default "element" -ValidateSet "element", "attribute", "text"
+$attribute = Get-AnsibleParam $params "attribute" -type "str" -FailIfEmpty ($type -eq "attribute")
 
 $result = New-Object PSObject @{
     win_xml = New-Object PSObject
